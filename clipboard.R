@@ -487,3 +487,184 @@ addToHouses <- function(df,houses,inc) {
         }        
     }
 }
+
+buildHousesFromBv <- function(df, precision){
+    agg <- aggregate(x = df$Lat, 
+                     by = list(round(df$Lat,digits = precision), round(df$Lon,digits = precision), df$VCode), FUN=length)
+    agg <- cbind(row.names(agg), agg)
+    names(agg) <- c("HouseId","Lat","Lon", "Type", "Count")
+    return(agg)
+}
+
+
+addIncidentsFromDf <- function(df, houses, precision){
+    # df must have columns Lat, Lon, IncType
+    agg <- aggregate(x = df$Lat, 
+                     by = list(round(df$Lat,digits = precision), round(df$Lon,digits = precision), df$IncType), FUN=length)
+    if(is.null(houses)){
+        nh <- 0
+    } else {
+        nh <- nrow(houses)    
+    }
+    hId <- ((nh+1):(nh+nrow(agg)))
+    agg <- cbind(hId,agg)
+    names(agg) <- c("HouseId","Lat","Lon", "Type", "Count")
+    houses <- rbind(houses, agg)
+    return(houses)
+}
+
+
+# --------- UNUSED
+
+
+findDefaultCoordinates <- function(df,precision) {
+    #Here, we try to find observations in a df with coordinates that are same to a level of precision
+    agg <-
+        aggregate(x = df$ID, by = list(
+            round(df$Lon,digits = precision),round(df$Lat,digits = precision)
+        ),length)
+    agg <-
+        agg[agg$x > 2,] #If the number of x is high, we probably have a set of default coordinates
+    # sprintf("%.8f",agg[,1])
+    return(agg)
+}
+
+# get unique violation codes for examination
+#     un <- unique(bv$ViolationCode,use.names = FALSE)
+#     write.csv(file = "violcodes.csv",x = un, row.names = FALSE)
+
+# violations <- data.frame(bv$ViolationCode,bv$ViolDescription,bv$Disposition)
+# write.csv(file="violations.csv",x=violations,row.names=FALSE)
+# assign("violations",violations,.GlobalEnv)
+
+matchHouses <- function(row,houses){
+    nr <- nrow(houses)
+    idx <- findInHouses(row,houses)
+    if(idx > 0){
+        houses$count = houses$count + row$count
+    } else {
+        houses
+    }
+}
+
+
+buildHousesFromBv <- function(df, precision){
+    agg <- aggregate(x = df$Lat, 
+                     by = list(round(df$Lat,digits = precision), round(df$Lon,digits = precision), df$VCode), FUN=length)
+    agg <- cbind(row.names(agg), agg)
+    names(agg) <- c("HouseId","Lat","Lon", "Type", "Count")
+    return(agg)
+}
+
+# 26.9.2016
+
+
+# Return the id of the house whose coordinates match those of the given row
+findInHouses <- function(row, houses) {
+    rlat <- round(as.numeric(row["Lat"]),digits=4)
+    rlon <- round(as.numeric(row["Lon"]),digits=4)    
+    rowMatch <- ((rlat == houses$Lat) & (rlon == houses$Lon))
+    if(sum(rowMatch)< 1){
+        return(0)
+        # row$house <- 0
+    } else{
+        matchIdx <- which(rowMatch)
+        if(length((matchIdx))>1){
+            # House is not unique. SHould not happen!
+            return(-1)
+        } else {
+            return(matchIdx)
+        }
+    }
+}
+
+# Would this perform better?
+findInHouses2 <- function(row, houses) {
+    rlat <- round(as.numeric(row["Lat"]),digits=4)
+    rlon <- round(as.numeric(row["Lon"]),digits=4)    
+    res <- which(houses$Lat == rlat & houses$Lon == rlon)
+    houses[res,]$HouseId
+    # coord <- c(round(row["Lat"],digits=4),round(row["Lon"],digits=4))    
+    # tfVect <- match(coord, houses[,1:2])
+    # OR
+    # tfVect <- coord %in% houses[,1:2]
+    # return(houses[tfVect,])
+}
+
+#nbInd <- sample(1:nrow(houses), size=nrow(sgh), replace=FALSE)
+#nbTrainInd <- sample(nbInd, size=length(nbInd), replace=FALSE)
+#nbTestInd <- nbInd[!(nbInd %in% nbTrainInd)]
+#nbHousesTrain <- houses[nbTrainInd,]
+#nbHousesTest <- houses[nbTestInd,]
+
+
+buildHousesFromDf <- function(df, houses, precision){
+    # We'll aggregate all incidents from any df to a set of houses (coordinates) irrespective of incident type.
+    # House structure: (HouseId, Lat, Lon). Lat and Lon represent the center of the house, which is about 11m x 11m.
+    hCoord <- data.frame(Lat=houses$Lat, Lon=houses$Lon)
+    dCoord <- data.frame(Lat=round(df$Lat,digits = precision), Lon=round(df$Lon,digits = precision))
+    # Remove NA values
+    naVector <- is.na(dCoord$Lat+dCoord$Lon)
+    dCoord <- dCoord[!naVector,]
+    coord <- rbind(hCoord,dCoord)
+    rm(df,hCoord,dCoord)
+    # Remove added duplicates
+    coord <- coord[!duplicated(coord),]
+    houses <- coord
+    rm(coord)
+    return(houses)
+}
+
+
+buildHouses <- function(){
+    # Load each file and allocate incident coordinates to houses
+    bv <- getBViol()
+    bv <- formatBv(bv)
+    houses <- NULL
+    houses <- buildHousesFromDf(bv, houses, 4)
+    rm(bv)
+    d311 <- getD311()
+    houses <- buildHousesFromDf(d311, houses, 4)
+    rm(d311)
+    cr <- getCrime()
+    houses <- buildHousesFromDf(cr, houses, 4)
+    houses <- houses[order(houses$Lat, houses$Lon),]
+    row.names(houses) <- 1:nrow(houses)
+    houses <- cbind(row.names(houses), houses)
+    names(houses) <- c("HouseId", "Lat", "Lon")
+    houses$HouseId <- as.character(houses$HouseId)
+    houses <- data.table(houses)
+    setkey(houses,Lat,Lon)
+    return(houses)
+}
+
+
+addIncidentsFromDf <- function(df, inc, precision){
+    # df must have columns Lat, Lon, IncType
+    newRows <- cbind(df$Lat, df$Lon, 1)
+    colnames(newRows) <- c("Lat", "Lon", "Count")
+    inc <- rbind(inc, newRows)
+    agg <- aggregate(x = inc$Count, by = list(round(inc$Lat,digits = precision), round(inc$Lon,digits = precision)), FUN=sum)
+    #     agg <- aggregate(x = df$Lat, 
+    #                      # by = list(round(df$Lat,digits = precision), round(df$Lon,digits = precision), df$IncType), FUN=length)
+    #                      by = list(round(df$Lat,digits = precision), round(df$Lon,digits = precision)), FUN=length)
+    # names(agg) <- c("Lat","Lon", "Type", "Count")
+    names(agg) <- c("Lat","Lon", "Count")
+    # inc <- rbind(inc, agg)
+    return(agg)
+}
+
+
+sumIncidents <- function(){
+    bv <- getBViol()
+    bv <- formatBv(bv)
+    inc <- data.frame(Lat=NULL, Lon=NULL, IncType=NULL)
+    inc <- addIncidentsFromDf(bv, inc, 4)    
+    d311 <- getD311()
+    inc <- addIncidentsFromDf(d311, inc, 4)
+    cr <- getCrime()
+    inc <- addIncidentsFromDf(cr, inc, 4)
+    inc <- inc[order(inc$Lat, inc$Lon),]
+    row.names(inc) <- 1:nrow(inc)
+    return(inc)
+}
