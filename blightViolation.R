@@ -1,15 +1,23 @@
-# Program idea: fit incident data to data frame. Select only relevant columns, and always use same names for them. 
+# Program idea: fit incident data to data table. Select only relevant columns, and always use same names for them. 
 # From incident data, derive unique locations of a given area = houses. House data: HouseId, Lat, Lon.
-# Then aggregate incidents by type to houses.
-
-loadDf <- function(fileName) {
+# Count number of incidents per house.
+# Assign demolition permits to houses.
+# Train simple model: demolition(yes/no) ~ incident count
+setDirs <- function(){
     basedir <-
         "C:/Users/setup/Documents/coursera/uw/datascience/capstone"
-    datadir <- paste0(basedir, "/data")
-    codedir <- paste0(basedir, "/code")
-    setwd(datadir)
+    assign("datadir",(paste0(basedir, "/data")),.GlobalEnv)
+    assign("codedir",(paste0(basedir, "/code")),.GlobalEnv)
+    setwd(datadir)    
+}
+
+loadDf <- function(fileName) {
+    setDirs()
     fullName <- paste0(datadir, "/", fileName)
-    df <- read.csv(fullName, stringsAsFactors = FALSE)
+    # tryCatch(
+        df <- read.csv(fullName, stringsAsFactors = FALSE)
+#         error = function(e) "File not found!"
+#     )
     return(df)
 }
 
@@ -19,14 +27,20 @@ loadDt <- function(fileName){
     return(d)
 }
 
+writeData <- function(data, filename) {
+    setDirs()
+    file <- paste0(datadir,"/",filename)
+    write.csv(x = data, file = file, row.names = FALSE)
+}
+
 getBViol <- function(){
-    bv <- loadDf("detroit-blight-violations.csv")
+    bv <- loadDt("detroit-blight-violations.csv")
     return(bv)
 }
 
 formatBv <- function(bv) {
     bv <- subset(
-        bv,select = c(
+        bv,!(is.null("ViolationCode")),select = c(
             "ViolationCode", "ViolDescription",
             "ViolationAddress","ViolationStreetNumber", "ViolationStreetName", "TicketIssuedDT"
         )
@@ -37,14 +51,15 @@ formatBv <- function(bv) {
         # Now we have something like (42.32544917300004, -83.06413908999997)
         coord <- gsub("[()]","",rowStr)
         coord <- unlist(strsplit(coord,split = ","))
+        coord <- c(coord[1], coord[2])
         return(coord)
     }
     coord <- t(apply(bv,1,extractCoord))
     # Add latitude and longitude as first columns
     bv <- cbind(as.numeric(coord[,1]),as.numeric(coord[,2]),bv)
     names(bv) <-
-        c("Lat","Lon","IncType","ViolDescription", "VAddress","VStrNr","VStrName")
-    bv <- bv[,1:7]
+        c("Lat","Lon","IncType","ViolDescription", "VAddress","VStrNr","VStrName","TicketIssueDT")
+    return(bv)
 } # formatBv
 
 formatBvAddress <- function(bv){
@@ -56,19 +71,9 @@ formatBvAddress <- function(bv){
 
 getD311 <- function() {
     d311 <- loadDf("detroit-311.csv")
-    # We'll ignore some alerts, as they are not specific to a house
-    # nor caused by the house owner
-    ignore <-
-        c(
-            "Water Main Break", "Fire Hydrant Issue", "Traffic Signal Issue",
-            "Potholes", "Test (internal use only, public issue)",
-            "Customer Service (internal use only, private issue)",
-            "Graffiti Abatement (internal use only, public issue)"
-        )
-    # d311 <- d311[!(d311$issue_type %in% ignore),]
-    u311type <- unique(d311$issue_type,use.names = FALSE)
+#    u311type <- unique(d311$issue_type,use.names = FALSE)
     d311 <- subset(
-        d311,!(d311$issue_type %in% ignore),
+        d311,
         select = c(
             issue_type,ticket_closed_date_time,ticket_created_date_time,
             address,lat,lng
@@ -82,64 +87,29 @@ getD311 <- function() {
     names(d311) <- n311
     d311$Lat <- as.numeric(d311$Lat)
     d311$Lon <- as.numeric(d311$Lon)
+    d311 <- data.table(d311)
     return(d311)
 }
 
 getCrime <- function(){
-    cr <- loadDf("detroit-crime.csv")
+    cr <- loadDt("detroit-crime.csv")
     cr <- subset(cr,select=c("CATEGORY", "LAT", "LON"))
     names(cr) <- c("IncType", "Lat", "Lon")
     return(cr)
 }
 
-
-getDemolition <- function(){
-        # if(is.null(dem)){
-            dem <- read.csv(file=
-                                "C:/Users/setup/Documents/coursera/uw/datascience/capstone/data/detroit-demolition-permits.tsv",
-                            sep = "\t", stringsAsFactors = FALSE)
-        # }
-#         dem <- subset(dem, select=c(PERMIT_ISSUED, CASE_TYPE, BLD_PERMIT_TYPE, site_location))
-        return(dem)
-}
-
-formatDemolition <- function(dem){
-        extractCoordAdd <- function(row){
-            loc <- row["site_location"]
-            # loc is like "4331 BARHAM\nDetroit, MI\n(42.394106, -82.9474)"
-            loc <- unlist(strsplit(toString(loc),split = "\n"))
-            str <- loc[1]
-            cty <- loc[2]
-            crd <- loc[3]
-            # Now we have something like (42.32544917300004, -83.06413908999997)
-            crd <- gsub("[()]","",crd)
-            crd <- unlist(strsplit(crd,split = ","))
-            lat <- crd[1]
-            lon <- crd[2]
-            coord <- c(lat, lon, str, cty)
-            return(coord)
-        }
-        dnam <- names(dem)
-        coord <- t(apply(dem, 1, extractCoordAdd))
-        dem <- cbind(as.numeric(coord[,1]), as.numeric(coord[,2]), coord[,3], coord[,4], dem)
-        dnam <- c("Lat", "Lon", "Street", "City", dnam)
-        names(dem) <- dnam
-        dem$Street <- as.character(dem$Street)
-        dem$City <- as.character(dem$City)
-        return(dem)
-}
-
-
-formatForInc <- function(df){
-    inc <- data.frame(Lat = df$Lat, Lon=df$Lon) #possibly add IncType
+formatForInc <- function(dt){
+    inc <- data.table(Lat = dt$Lat, Lon=dt$Lon) #possibly add IncType
     return(inc)
     
 }
 
-buildHouses2 <- function(precision){
+
+buildHouses3 <- function(precision){
+    library(data.table)
     bv <- getBViol()
     bv <- formatBv(bv)
-    inc <- data.frame()
+    inc <- data.table()
     inc <- rbind(inc, formatForInc(bv))
     rm(bv)
     d311 <- getD311()
@@ -148,51 +118,135 @@ buildHouses2 <- function(precision){
     cr <- getCrime()
     inc <- rbind(inc, formatForInc(cr))
     rm(cr)
-    houses <- aggregate(x=inc$Lat, by=list(round(as.numeric(inc$Lat),digits=precision), round(as.numeric(inc$Lon), digits = precision)), FUN=length)
+    # Remove clear geographic outliers. Coordinates from Detroit boundaries with a margin.
+    inc <- inc[Lat %between% c(42.25,42.5) & Lon %between% c(-83.3,-82.9)]
+    # Then against Detroit city boundaries
+    inc <- overDetroit(inc)
+    print(paste('Number of incidents in Detroit total: ', nrow(inc)))
+    inc <- data.table(inc)
+    inc$Lat <- round(as.numeric(inc$Lat),digits=precision)
+    inc$Lon <- round(as.numeric(inc$Lon),digits=precision)
+    setkey(inc, Lat, Lon)
+    # The data table operator .N adds the number of incidents in the by group to every member of the group. 
+    # We add it as a new column Count.
+    inc <- inc[,":=" (Count = .N), by= list(Lat, Lon)]
+    # Now we still need to remove duplicates (incidents with identical coordinates, when rounded to precision)
+    houses <- unique(inc)
     rm(inc)
-    houses <- data.table(houses)
     colnames(houses) <- c("Lat", "Lon", "Count")
-    setkey(houses, Lat, Lon)
+    # Houses are now sorted by ascending Lat, Lon. Add row number as unique HouseId
     houses <- cbind(row.names(houses),houses)
     colnames(houses) <- c("HouseId", "Lat", "Lon", "Count")
+    setkey(houses, Lat, Lon)
+    print(paste('Total counts in summary table houses: ', sum(houses$Count)))    
     return(houses)
 }
 
+overDetroit <- function(dt){
+    # dt must be a data table with columsn Lon and Lat with no NAs
+    library(sp)
+    library(rgdal)
+    coordinates(dt) <- ~Lon + Lat
+    detroitShapeDir <- paste0(datadir, "/City Boundaries shapefile")
+    detroit <- readOGR(dsn=detroitShapeDir, layer = "geo_export_941b9f41-e08a-40db-ae36-d77a7046e1a5")
+    proj4string(dt) <- proj4string(detroit)
+    dInD <- dt[detroit,] #shorthand for dt[!is.na(over(dt,detroit)),]
+    dt <- tryCatch(
+        cbind(dInD@coords[,2],dInD@coords[,1], dInD@data), # add Lat, Lon
+        error = function(e){
+            print("Could not find additional data in dt!")
+            return(data.table(Lat=dInD@coords[,2],Lon=dInD@coords[,1]))
+        }
+    )
+    colnames(dt)[1:2] <- c("Lat", "Lon")
+    dt <- data.table(dt)
+    return(dt)
+}
+
+getDemolition <- function(){
+    # if(is.null(dem)){
+    dem <- read.csv(file=
+                        "C:/Users/setup/Documents/coursera/uw/datascience/capstone/data/detroit-demolition-permits.tsv",
+                    sep = "\t", stringsAsFactors = FALSE)
+    # }
+    return(dem)
+}
+
+formatDemolition <- function(dem){
+    # Extract the Lat+Lon and street address into own columns
+    extractCoordAdd <- function(row){
+        loc <- row["site_location"]
+        # loc is like "4331 BARHAM\nDetroit, MI\n(42.394106, -82.9474)"
+        loc <- unlist(strsplit(toString(loc),split = "\n"))
+        str <- loc[1]
+        cty <- loc[2]
+        crd <- loc[3]
+        # Now we have something like (42.32544917300004, -83.06413908999997)
+        crd <- gsub("[()]","",crd)
+        crd <- unlist(strsplit(crd,split = ","))
+        lat <- crd[1]
+        lon <- crd[2]
+        coord <- c(lat, lon, str, cty)
+        return(coord)
+    }
+    dnam <- names(dem)
+    coord <- t(apply(dem, 1, extractCoordAdd))
+    dem <- cbind(as.numeric(coord[,1]), as.numeric(coord[,2]), coord[,3], coord[,4], dem)
+    dnam <- c("Lat", "Lon", "Street", "City", dnam)
+    names(dem) <- dnam
+    dem$site_location <- gsub("\n"," ",dem$site_location)
+    dem$owner_location <- gsub("\n"," ",dem$owner_location)
+    dem$contractor_location <- gsub("\n"," ",dem$contractor_location)
+    dem$Street <- as.character(dem$Street)
+    dem$City <- as.character(dem$City)
+    return(dem)
+}
 
 prepareDemolition <- function(){
     dem <- getDemolition()
     dem <- formatDemolition(dem)
     dem <- data.table(dem)
-    # Some 900 entries have NA for coordinates. We need to treat them separately with geocoding.
-    demToGeocode <- dem[is.na(Lat)]
-    # demToGeocode <- dem[is.na(dem$Lat),]
-    # demToGeocode <- head(demToGeocode,10)
-    # Remove from dem the entries that need to be geocoded 
+    # Some 900 entries have NA for coordinates. We'll get them from file, if available, or with ggmap::geocode    
+    demToGeocode <- dem[is.na(Lat)] #I've tested that identical(is.na(dem$Lat), is.na(dem$Lon))
+    # Remove from dem the entries that need geocoding 
     dem <- dem[!(is.na(Lat))]
-    
-    addresses <- paste0(demToGeocode$Street, " ",gsub(",", "",demToGeocode$City))
-    geocoded <- data.frame()
-    # Start the geocoding process - address by address. geocode() function takes care of query speed limit.
-    for (ii in (1:length(addresses))){
-        if (ii %% 50 == 0){
-            print(paste("Working on index", ii, "of", length(addresses)))    
+    geocoded <- tryCatch(
+        loadDf("geocoded.csv"),
+        error = function(e){
+            # print("Can't touch this!")
+            demToGeocode <- get0("demToGeocode")
+            addresses <- paste0(demToGeocode$Street, " ",gsub(",", "",demToGeocode$City))
+#             # TESTING: First try geocoding with a small sample     
+#             addresses <- head(addresses, 10)
+            # Start the geocoding process - address by address. geocode() function takes care of query speed limit.
+            library(ggmap)
+            for (ii in (1:length(addresses))){
+                if (ii %% 50 == 0){
+                    print(paste("Working on index", ii, "of", length(addresses)))    
+                }
+                #query the google geocoder - this will pause here if we are over the limit.
+                result = geoCodeAddress(addresses[ii]) 
+                # print(result$status)     
+                result$index <- ii
+                #append the answer to the results file.
+                geocoded <- rbind(geocoded, result)
+                #save temporary results as we are going along
+                # saveRDS(geocoded, tempfilename)
+            }
+            # Export the geocoded results for scrutiny
+            assign("geocoded",geocoded,.GlobalEnv)
+            writeData(data = geocoded, filename="geocoded.csv")
+            return(geocoded)
         }
-        #query the google geocoder - this will pause here if we are over the limit.
-        result = geoCodeAddress(addresses[ii]) 
-        # print(result$status)     
-        result$index <- ii
-        #append the answer to the results file.
-        geocoded <- rbind(geocoded, result)
-        #save temporary results as we are going along
-        # saveRDS(geocoded, tempfilename)
-    }
+    )
+    # Finally round and add the geocoded entries to dem
     # demToGeocode$accuracy <- geocoded$accuracy
-    demToGeocode$Lat <- geocoded$Lat
-    demToGeocode$Lon <- geocoded$Lon
-    # Remove geographic outliers
-    demToGeocode <- demToGeocode[Lat %between% c(42.24,42.5) & Lon %between% c(-83.3,-82.9)]
-    # Finally add the geocoded entries to dem
+    demToGeocode$Lat <- round(geocoded$Lat, digits = 4)
+    demToGeocode$Lon <- round(geocoded$Lon, digits = 4)
     dem <- rbind(dem,demToGeocode)
+    # Slice out those in Detroit only!
+    dem <- dem[!(is.na(Lat))]
+    dem <- overDetroit(dem)
     return(dem)
 }
 
@@ -225,33 +279,27 @@ geoCodeAddress <- function(address){
 }
 
 demolitionHouses <- function(dem, houses){
-    # h <- data.table(houses)
-    # setkey(h,Lat,Lon)
-    # Link demolition permits to houses
-    d <- apply(dem, 1, findInHouses3,houses)
-    dem <- cbind(d, dem)
-    names(dem)[names(dem)=="d"] <- "house"
-    dem
-}
-
-findInHouses3 <- function(row, houses) {
-    # houses must be a data.table. Returns HouseId (an integer) or NA
-    rlat <- round(as.numeric(row["Lat"]),digits=4)
-    rlon <- round(as.numeric(row["Lon"]),digits=4)
-    res <- houses[list(rlat,rlon)]
-    res$HouseId
+    # Link demolition permits to houses. Both must be data.table
+    #   Use a simple inner join of dt!
+    # dem: Lat, Lon, Street...  house: HouseId, Count, Lat, Lon.
+    setkey(dem, Lat, Lon)
+    setkey(houses, Lat, Lon)
+    dh <- dem[houses, nomatch=0]
+    return(dh)
 }
 
 prepareTtSet <- function(dh, houses){
-    dh <- dh[!is.na(house)]
-    dh <- subset(dh,select=c("house","Lat","Lon","PERMIT_ISSUED","LEGAL_USE","PARCEL_SIZE","STORIES"))
-    dh <- dh[!duplicated(dh$house)]
-    dh$Lat <- round(dh$Lat,digits=4)
-    dh$Lon <- round(dh$Lon,digits=4)
+    dh <- dh[!is.na(HouseId)]
+    dh <- subset(dh,select=c("HouseId","Lat","Lon","Count","PERMIT_ISSUED","LEGAL_USE","PARCEL_SIZE","STORIES"))
+    # Multiple demolition permits have been issued to the same house. Remove duplicates.
+    dh <- dh[!duplicated(dh$HouseId)]
     n <-nrow(dh)
+    # all houses in dh are marked for demolition. Consider them blighted. Form a data table with them, with flag ToDemolition.
     bHouses <- data.table(HouseId = dh$house, Lat = dh$Lat, Lon=dh$Lon, ToDemolition = TRUE)
+    # we consider all houses that are not part of dh as non-blighted houses. 
     nbHouses <- houses[!(HouseId %in% dh$house)]
     nbHouses <- data.table(HouseId = as.integer(nbHouses$HouseId), Lat=nbHouses$Lat, Lon=nbHouses$Lon, ToDemolition = FALSE)
+    # Take a random sample of non-blighted houses, size equal to blighted.
     nbHouses <- nbHouses[sample(1:nrow(nbHouses), size=nrow(bHouses), replace=FALSE),]
     # as result, we have nrow(bHouses) = nrow(nbHouses) = 2483
     print(paste("Number of blighted houses: ", nrow(bHouses)))
@@ -270,7 +318,7 @@ prepareTtSet <- function(dh, houses){
 }
 
 incPerTtHouse <- function(tset){
-    bvc <- loadDf("bvcounts.csv")
+    bvc <- loadDf("bvcounts.csv") #Number of blight violations in each house
     bvc <- data.table(bvc)
     bvc <- setkey(bvc, Lat, Lon)
     
@@ -291,24 +339,35 @@ incPerTtHouse <- function(tset){
 
 main <- function(){
     library(data.table)
+    setDirs()
     if(is.null(get0("houses"))){ 
-        houses <- loadDt("housesWithinDetroit.csv") #reuse the cleaned set from Carto
-        setkey(houses,Lat,Lon)
-#         #build only if needed
-#         houses <- buildHouses2()
-#         write.csv(file = "houses.csv",x = houses,row.names = TRUE)
-        assign("houses",houses,.GlobalEnv)
+        # We need to load houses from file or build them again
+        houses <- tryCatch(loadDt("housesWithinDetroit.csv"), 
+                    error = function(e){
+                        # File not found, need to rebuild from source data
+                        houses <- buildHouses3(precision = 4)
+                        houses <- overDetroit(houses)
+                        names(houses) <- c("HouseId","Count","Lat","Lon")
+                        writeData(data = houses, filename = "housesWithinDetroit.csv")
+                        assign("houses",houses,.GlobalEnv)
+                        return(houses)
+                    } 
+        )
     }
-    
     #Get demolition permits, geocode where necessary, clear outliers and assign to houses
     # -- use the files already created instead of building them with the code below 
-    dh <- loadDt("houses_with_demolition.csv")
+    dh <- tryCatch(loadDt("dem-houses.csv"),
+             # stop("Could not load houses with demolition!")
+                error = function(e){
+                 # File not found, need to rebuild from source data
+                    dem <- prepareDemolition()
+                    dh <- demolitionHouses(dem,houses)
+                    assign("demolitionhouses",dh,.GlobalEnv)
+                    write.csv(file = "dem-houses.csv",x = dh,row.names = FALSE)
+                    return(dh)
+             } 
+    )
     setkey(dh,house)
-    # library(ggmap)
-    # dem <- prepareDemolition()
-    # dh <- demolitionHouses(dem,houses)
-    # assign("demolitionhouses",dh,.GlobalEnv)
-    # write.csv(file = "dem-houses.csv",x = dh,row.names = FALSE)
     prepareTtSet(dh,houses)
     #     # Next go through the files again and build aggregates by location and incident type 
     #     inc <- sumIncidents()
@@ -348,5 +407,7 @@ findCount <- function(tsrow){
 }
 
 isInDetroit <- function(bvrow){
-    res <- bvc[.(lat,lon)]
+    res <- bvc[.(lat,lon)] 
 }
+
+#install.packages("rgdal")

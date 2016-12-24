@@ -668,3 +668,93 @@ sumIncidents <- function(){
     row.names(inc) <- 1:nrow(inc)
     return(inc)
 }
+
+getD311 <- function() {
+    d311 <- loadDf("detroit-311.csv")
+    # We'll ignore some alerts, as they are not specific to a house
+    # nor caused by the house owner
+    ignore <-
+        c(
+            "Water Main Break", "Fire Hydrant Issue", "Traffic Signal Issue",
+            "Potholes", "Test (internal use only, public issue)",
+            "Customer Service (internal use only, private issue)",
+            "Graffiti Abatement (internal use only, public issue)"
+        )
+    # d311 <- d311[!(d311$issue_type %in% ignore),]
+    #d311 <- subset(d311,d311$Lat<42.3)
+    u311type <- unique(d311$issue_type,use.names = FALSE)
+    d311 <- subset(
+        d311,!(d311$issue_type %in% ignore),
+        select = c(
+            issue_type,ticket_closed_date_time,ticket_created_date_time,
+            address,lat,lng
+        )
+    )
+    # assign("u311type",u311type,envir = .GlobalEnv)
+    n311 <- names(d311)
+    n311[1] <- "IncType"
+    n311[5] <- "Lat"
+    n311[6] <- "Lon"
+    names(d311) <- n311
+    d311$Lat <- as.numeric(d311$Lat)
+    d311$Lon <- as.numeric(d311$Lon)
+    return(d311)
+}
+
+buildHouses2 <- function(precision){
+    bv <- getBViol()
+    bv <- formatBv(bv)
+    inc <- data.frame()
+    inc <- rbind(inc, formatForInc(bv))
+    rm(bv)
+    d311 <- getD311()
+    inc <- rbind(inc, formatForInc(d311))
+    rm(d311)
+    cr <- getCrime()
+    inc <- rbind(inc, formatForInc(cr))
+    rm(cr)
+    houses <- aggregate(x=inc$Lat, by=list(round(as.numeric(inc$Lat),digits=precision), round(as.numeric(inc$Lon), digits = precision)), FUN=length)
+    rm(inc)
+    houses <- data.table(houses)
+    colnames(houses) <- c("Lat", "Lon", "Count")
+    setkey(houses, Lat, Lon)
+    houses <- cbind(row.names(houses),houses)
+    colnames(houses) <- c("HouseId", "Lat", "Lon", "Count")
+    return(houses)
+}
+
+housesInDetroitSnip <- function(){
+    #crs_geo <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84")  # geographical, datum WGS84
+    #proj4string(detroit) <- crs.geo 
+    
+}
+    
+
+demolitionHouses <- function(dem, houses){
+        # Replaced the below with a simple inner join!
+        d <- apply(dem, 1, findInHouses3,houses)
+        dem <- cbind(d, dem)
+        names(dem)[names(dem)=="d"] <- "house"
+        dem
+}
+
+findInHouses3 <- function(row, houses) {
+    # houses must be a data.table. Returns HouseId (an integer) or NA
+    rlat <- round(as.numeric(row["Lat"]),digits=4)
+    rlon <- round(as.numeric(row["Lon"]),digits=4)
+    res <- houses[list(rlat,rlon)]
+    res$HouseId
+}
+
+getAndSaveData <- function(){
+    # WORK IN PROGRESS: this function builds and filters the houses, demolition permits and test data, and saves to files for later use
+    houses <- buildHouses3(precision = 4)
+    houses <- housesInDetroit(houses)
+    names(houses) <- c("HouseId","Count","Lat","Lon")
+    writeData(data = houses, filename = "housesWithinDetroit.csv")
+    assign("houses",houses,.GlobalEnv)
+    dem <- prepareDemolition()
+    dh <- demolitionHouses(dem,houses)
+    assign("demolitionhouses",dh,.GlobalEnv)
+    write.csv(file = "dem-houses.csv",x = dh,row.names = FALSE)
+}
