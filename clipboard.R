@@ -758,3 +758,100 @@ getAndSaveData <- function(){
     assign("demolitionhouses",dh,.GlobalEnv)
     write.csv(file = "dem-houses.csv",x = dh,row.names = FALSE)
 }
+
+
+incPerTtHouse <- function(tset){
+    bvc <- loadDf("bvcounts.csv") #Number of blight violations in each house
+    bvc <- data.table(bvc)
+    bvc <- setkey(bvc, Lat, Lon)
+    
+    findCount <- function(tsetrow){
+        # bvcrow <- bvc[.(tsetrow["Lat"],tsetrow["Lon"])]
+        lat <- tsetrow["Lat"]
+        lon <- tsetrow["Lon"]
+        bvcrow <- bvc[.(lat,lon)]
+        if(nrow(bvcrow)>1){
+            print("Error!!")
+        }
+        count <- bvcrow$Count
+        return(count)
+    }
+    cnt <- unlist(apply(tset,1,findCount))
+    tset <- cbind(tset,cnt)
+}
+
+
+#31.12.2016 - for simple model
+formatBv <- function(bv) {
+    bv <- subset(
+        bv,!(is.null("ViolationCode")),select = c(
+            "ViolationCode", "ViolDescription",
+            "ViolationAddress","ViolationStreetNumber", "ViolationStreetName", "TicketIssuedDT"
+        )
+    )
+    extractCoord <- function(bvsRow) {
+        # bvsRow is like ..., 2566 GRAND BLVD\nDetroit, MI\n(42.36318237000006, -83.09167672099994)
+        rowStr <- unlist(strsplit(toString(bvsRow),split = "\n"))[3]
+        # Now we have something like (42.32544917300004, -83.06413908999997)
+        coord <- gsub("[()]","",rowStr)
+        coord <- unlist(strsplit(coord,split = ","))
+        coord <- c(coord[1], coord[2])
+        return(coord)
+    }
+    coord <- t(apply(bv,1,extractCoord))
+    # Add latitude and longitude as first columns
+    bv <- cbind(as.numeric(coord[,1]),as.numeric(coord[,2]),bv)
+    names(bv) <-
+        c("Lat","Lon","IncType","ViolDescription", "VAddress","VStrNr","VStrName","TicketIssueDT")
+    return(bv)
+} # formatBv
+
+formatBvAddress <- function(bv){
+    # Check column names before calling this function!
+    # bv$ViolationAddress <- gsub("\n",",",bv$ViolationAddress)
+    bv$ViolationAddress <- gsub("\n",",",bv$VAddress)
+    return(bv)
+}
+
+main <- function(){
+    library(data.table)
+    setDirs()
+    if(is.null(get0("houses"))){ 
+        # We need to load houses from file or build them again
+        houses <- tryCatch(loadDt("housesWithinDetroit.csv"), 
+                           error = function(e){
+                               # File not found, need to rebuild from source data
+                               houses <- buildHouses3(precision = 4)
+                               houses <- overDetroit(houses)
+                               names(houses) <- c("HouseId","Count","Lat","Lon")
+                               writeData(data = houses, filename = "housesWithinDetroit.csv")
+                               assign("houses",houses,.GlobalEnv)
+                               return(houses)
+                           } 
+        )
+    }
+    #Get demolition permits, geocode where necessary, clear outliers and assign to houses
+    dh <- tryCatch(loadDt("dem-houses.csv"),
+                   # stop("Could not load houses with demolition!")
+                   error = function(e){
+                       # File not found, need to rebuild from source data
+                       dem <- prepareDemolition()
+                       dh <- demolitionHouses(dem,houses)
+                       assign("demolitionhouses",dh,.GlobalEnv)
+                       write.csv(file = "dem-houses.csv",x = dh,row.names = FALSE)
+                       return(dh)
+                   } 
+    )
+    setkey(dh,HouseId)
+    prepareTtSet(dh,houses)
+    #     # Next go through the files again and build aggregates by location and incident type 
+    #     inc <- sumIncidents()
+    #     # Next see in which house each group of incidents took place, 
+    #     # so finally we have a df of incident grouped by location (house number, coordinates, incident type)
+    #     # Col hinc is the house number The first column (row name) has no meaning.
+    #     hinc <- apply(inc,1,findInHouses3,houses)
+    #     inci <- cbind(hinc,inc)
+    #     inci <- inci[order(inci$hinc),]
+    #     write.csv(file="incidents_aggr.csv", x=inci)
+    
+} #main
