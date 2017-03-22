@@ -16,6 +16,8 @@ test_that("Formatting blight data",{
     expect_equal(bvt$VCategory[4], "waste")
     expect_equal(bvt$ViolEqMail[4], TRUE)
     expect_equal(bvt$ViolEqMail[5], FALSE)
+    expect_equal(sum(bvt$VCategory=="waste"),71)
+    expect_equal(bvt$VCategory[135], "permits")
 })
 
           

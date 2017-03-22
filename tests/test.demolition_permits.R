@@ -2,23 +2,24 @@ library(testthat)
 library(data.table)
 context("Formatting demolition permits")
 
-### Test formatDemolion
-mock_dem <- data.frame(foo = c(1,2,3,4,5,6),
-                       site_location = c(
-                           "4331 BARHAM\nDetroit, MI\n(42.394101, -82.9471)",
-                           "4331 WHATEVA\nDetroit, MI\n(42.394102, -82.9472)",
-                           "(42.394103, -82.9473)",
-                           "4331 SUMTHIN\nDetroit, MI\n(42.394104, -82.9474)",
-                           "4331 FOOBAR\nDetroit, MI\n",
-                           "4331 GETTHIS\nDetroit, MI\n(42.394106, -82.9476)"
-                       ),
-                       stringsAsFactors = FALSE)
-mock_dem$owner_location <- NA
-mock_dem$contractor_location <- NA
-
-res <- formatDemolition(mock_dem)
 
 test_that("Function formatDemolition extracts coordinates from site_address",{
+    ### Test formatDemolion
+    mock_dem <- data.frame(foo = c(1,2,3,4,5,6),
+                           site_location = c(
+                               "4331 BARHAM\nDetroit, MI\n(42.394101, -82.9471)",
+                               "4331 WHATEVA\nDetroit, MI\n(42.394102, -82.9472)",
+                               "(42.394103, -82.9473)",
+                               "4331 SUMTHIN\nDetroit, MI\n(42.394104, -82.9474)",
+                               "4331 FOOBAR\nDetroit, MI\n",
+                               "4331 GETTHIS\nDetroit, MI\n(42.394106, -82.9476)"
+                           ),
+                           stringsAsFactors = FALSE)
+    mock_dem$owner_location <- NA
+    mock_dem$contractor_location <- NA
+    
+    res <- formatDemolition(mock_dem)
+    
     expect_that(is.data.frame(res), equals(TRUE))
     expect_that(nrow(res), equals(6))
     expect_that(res[1,1], equals(42.394101))
